@@ -11,7 +11,8 @@
     ret))
 
 (defun collect (collector &rest things)
-  (setf (car collector) (last (setf (cdar collector) things)))
+  (when things
+    (setf (car collector) (last (setf (cdar collector) things))))
   (cdr collector))
 
 (defun get-attribute (element name)
