@@ -4,17 +4,53 @@
   (:export #:define-from-xml #:define-interface #:define-enum #:define-request #:define-event))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client/codegen)
 
-(defmacro define-interface ((interface-name &key export description) &body (enums requests events))
-  (declare (ignore enums requests events))
-  (let ((class-name (intern (lispify interface-name))))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun interface-var-name (interface-name)
+    (intern (format nil "*~A*" (lispify interface-name 'interface)))))
+
+(defmacro define-interface (interface-name &key export description)
+  (let ((class-name (intern (lispify interface-name)))
+        (interface-var (interface-var-name interface-name)))
     `(progn
        (defclass ,class-name (wayland-proxy) ()
          ,@(when description `((:documentation ,description))))
        ,@(when export `((eval-when (:compile-toplevel :load-toplevel :execute)
                           (export ',class-name))))
-       (let ((interface (foreign-symbol-pointer ,(format nil "~A_interface" interface-name)
-                                                :library 'libwayland-client)))
-         (defmethod wayland-interface ((proxy-object ,class-name)) interface)))))
+       (defvar ,interface-var)
+       (if (boundp ',interface-var)
+           (when (get ',interface-var 'interface-initialized)
+             (clear-wayland-interface ,interface-var))
+           (setf ,interface-var (foreign-alloc '(:struct wayland-interface))))
+       (setf (get ',interface-var 'interface-initialized) nil)
+       (defmethod wayland-interface ((proxy-object ,class-name)) ,interface-var))))
+
+(defmacro initialize-interface (interface-name interface-version &body (requests events))
+  (flet ((create-message (message)
+           (destructuring-bind (name since &rest args) message
+             ``(,,name
+                ,,(apply #'concatenate 'string (format nil "~@[~A~]" since)
+                         (mapcar (lambda (arg)
+                                   (destructuring-bind (type allow-null-p interface) arg
+                                     (format nil "~:[~;?~]~A" allow-null-p
+                                             (ecase type
+                                               (int "i")
+                                               (uint "u")
+                                               (fixed "f")
+                                               (string "s")
+                                               (object "o")
+                                               (new-id (if interface "n" "sun"))
+                                               (array "a")
+                                               (fd #\h)))))
+                                 args))
+                ,,@(mapcar (lambda (arg)
+                             (if (third arg) (interface-var-name (third arg)) '(null-pointer)))
+                           args)))))
+    (let ((interface-var (interface-var-name interface-name)))
+      `(progn (populate-wayland-interface ,interface-var
+                                          ,interface-name ,interface-version
+                                          `(,,@(mapcar #'create-message requests))
+                                          `(,,@(mapcar #'create-message events)))
+              (setf (get ',interface-var 'interface-initialized) t)))))
 
 (defmacro define-enum ((interface-name enum-name &key description bitfield-p export) &body entries)
   (let* ((lisp-type (if bitfield-p '(unsigned-byte 32) 'integer))
@@ -281,7 +317,8 @@ The CAR of the result is the original integer; the CDR is the ~
       (let* ((root (dom:document-element (cxml:parse-file xml-file (cxml-dom:make-dom-builder))))
              (interfaces (child-elems root))
              (copyright (text-contents (maybe-pop-node interfaces "copyright")))
-             (description (text-contents (maybe-pop-node interfaces "description"))))
+             (description (text-contents (maybe-pop-node interfaces "description")))
+             (fixup-forms (make-collector)))
         (declare (ignore copyright))
         `(progn
            ;; FIXME this doesn't really do anything except look good in the macroexpansion
@@ -289,6 +326,7 @@ The CAR of the result is the original integer; the CDR is the ~
            ,@(do-collecting ((interface interfaces))
                (assert (string= (dom:tag-name interface) "interface"))
                (do* ((interface-name (get-attribute interface "name"))
+                     (interface-version (parse-integer (get-attribute interface "version")))
                      (children (child-elems interface) (cdr children))
                      (description (text-contents (maybe-pop-node children "description")))
                      (enums (make-collector))
@@ -297,11 +335,21 @@ The CAR of the result is the original integer; the CDR is the ~
                      (events (make-collector))
                      (event-opcode 0))
                     ((endp children)
+                     (collect fixup-forms
+                       (labels ((strip-unnecessary-arg (arg)
+                                  (destructuring-bind (name type &key allow-null-p interface &allow-other-keys) arg
+                                    (declare (ignore name))
+                                    `(,type ,allow-null-p ,interface)))
+                                (strip-unnecessary-msg (thing)
+                                  (destructuring-bind ((interface-name name &key since &allow-other-keys) &rest args)
+                                      thing
+                                    (declare (ignore interface-name))
+                                    `(,name ,since ,@(mapcar #'strip-unnecessary-arg args)))))
+                         `(initialize-interface ,interface-name ,interface-version
+                            ,(mapcar #'strip-unnecessary-msg (collect requests))
+                            ,(mapcar #'strip-unnecessary-msg (collect events)))))
                      `(progn
-                        (define-interface (,interface-name :export ,export :description ,description)
-                          ,(collect enums)
-                          ,(collect requests)
-                          ,(collect events))
+                        (define-interface ,interface-name :export ,export :description ,description)
                         ,@(do-collecting ((enum (collect enums))) `(define-enum ,@enum))
                         ,@(do-collecting ((request (collect requests))) `(define-request ,@request))
                         ,@(do-collecting ((event (collect events))) `(define-event ,@event))))
@@ -315,4 +363,5 @@ The CAR of the result is the original integer; the CDR is the ~
                                                                   (prog1 event-opcode (incf event-opcode)))))
                          ((string= tag "enum")
                           (collect enums (parse-enum interface-name child)))
-                         (t (error "Unknown element ~A" child)))))))))))
+                         (t (error "Unknown element ~A" child))))))
+           ,@(collect fixup-forms))))))

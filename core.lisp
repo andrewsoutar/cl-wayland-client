@@ -5,12 +5,15 @@
   (:export #:find-proxy #:set-proxy-pointer #:destroy-proxy)
   (:export #:wayland-array-arg #:size #:data)
   (:export #:wayland-argument #:int #:uint #:fixed #:string #:object #:array #:fd)
-  (:export #:wayland-interface #:name #:version)
+  (:export #:wayland-message #:name #:signature #:types)
+  (:export #:wayland-interface #:name #:version #:method-count #:methods #:event-count #:events)
+  (:export #:populate-wayland-interface #:clear-wayland-interface)
   (:export #:wl-proxy-marshal-array #:wl-proxy-marshal-array-constructor-versioned))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client/core)
 
-(define-foreign-library libwayland-client
-  (t (:default "libwayland-client")))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (define-foreign-library libwayland-client
+    (t (:default "libwayland-client"))))
 (use-foreign-library libwayland-client)
 
 
@@ -85,11 +88,53 @@
   (array (:pointer (:struct wayland-array-arg)))
   (fd :int32))
 
+(defcstruct wayland-message
+  (name :string)
+  (signature :string)
+  (types (:pointer :pointer)))
+(defun populate-wayland-message (message name signature &rest types)
+  (setf (mem-ref message '(:struct wayland-message))
+        (list 'name (foreign-string-alloc name)
+              'signature (foreign-string-alloc signature)
+              'types (foreign-array-alloc (coerce types 'vector) `(:array :pointer ,(length types))))))
+(defun clear-wayland-message (message)
+  (with-foreign-slots (((:pointer name) (:pointer signature) (:pointer types))
+                       message (:struct wayland-message))
+    (foreign-string-free (mem-ref name :pointer))
+    (foreign-string-free (mem-ref signature :pointer))
+    (foreign-array-free (mem-ref types :pointer))))
+
 (defcstruct wayland-interface
   (name :string)
   (version :int)
-  ;; Don't need the rest
-  )
+  (method-count :int)
+  (methods (:pointer (:struct wayland-message)))
+  (event-count :int)
+  (events (:pointer (:struct wayland-message))))
+(defun populate-wayland-interface (interface name version methods events)
+  (flet ((alloc-messages (messages)
+           (loop with array = (foreign-alloc '(:struct wayland-message) :count (length messages))
+                 for i from 0
+                 for message in messages
+                 do (apply #'populate-wayland-message (mem-aptr array '(:struct wayland-message) i) message)
+                 finally (return array))))
+    (setf (mem-ref interface '(:struct wayland-interface))
+          (list 'name (foreign-string-alloc name)
+                'version version
+                'method-count (length methods)
+                'methods (alloc-messages methods)
+                'event-count (length events)
+                'events (alloc-messages events)))))
+(defun clear-wayland-interface (interface)
+  (with-foreign-slots (((:pointer name) method-count methods event-count events)
+                       interface (:struct wayland-interface))
+    (foreign-string-free (mem-ref name :pointer))
+    (dotimes (i method-count)
+      (clear-wayland-message (mem-aptr methods '(:struct wayland-message) i)))
+    (foreign-free methods)
+    (dotimes (i event-count)
+      (clear-wayland-message (mem-aptr events '(:struct wayland-message) i)))
+    (foreign-free events)))
 
 (defmethod initialize-instance :after ((proxy wayland-proxy) &key version &allow-other-keys)
   (when (and version (not (slot-boundp proxy 'version)))
