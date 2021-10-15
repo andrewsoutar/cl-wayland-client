@@ -135,13 +135,11 @@ The CAR of the result is the original integer; the CDR is the ~
            (collect arg-setup-forms
              `(when ,(if allow-null-p var t)
                 (macrolet ((arr (&rest stuff)
-                             `(c-access (:pointer (:struct wayland-array))
-                                        ,',wayland-arrays (,',array-index) ,@stuff)))
+                             `(c-access (:struct wayland-array) ,',wayland-arrays (,',array-index) ,@stuff)))
                   (setf (arr :. size) (length ,var)
                         (arr :. alloc) (length ,var)
                         (arr :. data) ,array-pointer
-                        (c-access (:pointer (:union wayland-argument))
-                                  ,wayland-arguments (,arg-index) :. array)
+                        (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. array)
                         (arr :&)))))))
         (new-id
          (assert (null (shiftf new-object-var var)))
@@ -151,14 +149,14 @@ The CAR of the result is the original integer; the CDR is the ~
                        (wayland-interface ,var)))
              (progn
                (collect arg-setup-forms
-                 `(setf (c-access (:pointer (:union wayland-argument)) ,wayland-arguments (,arg-index) :. string)
-                        (c-access (:pointer (:struct wayland-interface)) (wayland-interface ,var) :-> name)
-                        (c-access (:pointer (:union wayland-argument)) ,wayland-arguments (,(incf arg-index)) :. uint)
+                 `(setf (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. string)
+                        (c-access (:struct wayland-interface) (wayland-interface ,var) :-> name)
+                        (c-access (:union wayland-argument) ,wayland-arguments (,(incf arg-index)) :. uint)
                         (version ,var)))
                (incf arg-index))))
         (t (collect arg-setup-forms
              `(when ,(if allow-null-p var t)
-                (setf (c-access (:pointer (:union wayland-argument)) ,wayland-arguments (,arg-index) :. ,type)
+                (setf (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. ,type)
                       ,(if enum
                            `(,(intern (multiple-value-bind (interface enum) (parse-dotted enum interface-name)
                                         (lispify interface 'marshal enum)))
@@ -187,7 +185,7 @@ The CAR of the result is the original integer; the CDR is the ~
                             (cond ((eql type 'new-id) (assert interface))
                                   (interface (assert (eql type 'object))))
                             (flet ((getter (&rest stuff)
-                                     `(c-access (:pointer (:union wayland-argument)) arguments-pointer (,i) ,@stuff)))
+                                     `(c-access (:union wayland-argument) arguments-pointer (,i) ,@stuff)))
                               (if enum
                                   `(,(intern (multiple-value-bind (interface enum) (parse-dotted enum interface-name)
                                                (lispify interface 'unmarshal enum)))

@@ -39,7 +39,8 @@
     (setf (car tail) (append (car tail) (setf tail (cons (first remaining-forms) nil))))))
 
 (defmacro c-access (type base &rest forms)
-  (let (deref)
+  (let (deref
+        (type `(:pointer ,type)))
     (flet ((val ()
              (cond ((not deref) base)
                    ((and (listp base) (case (first base)
