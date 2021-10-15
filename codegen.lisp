@@ -57,14 +57,14 @@ The CAR of the result is the original integer; the CDR is the ~
                           (export '(,marshal-fun-name ,unmarshal-fun-name))))))))
 
 (defmacro define-request ((interface-name request-name &key opcode description destructor-p since export)
-                             &body args)
+                          &body args)
   (do ((function-name (intern (lispify interface-name request-name)))
        (remaining-args args (rest remaining-args))
        (arg-index 0 (1+ arg-index))
        (n-arrays 0)
        (lambda-list (make-collector))
        (arg-lisp-types (make-collector))
-       (array-pointer-bindings (make-collector))
+       (pointer-bindings (make-collector))
        (arg-setup-forms (make-collector))
        (object (gensym "OBJECT"))
        (wayland-arguments (gensym "WAYLAND-ARGUMENTS"))
@@ -87,8 +87,14 @@ The CAR of the result is the original integer; the CDR is the ~
                               (let ((array ,array))
                                 (if array
                                     (with-pointer-to-vector-data (pointer array) (thunk pointer))
-                                    (thunk array))))))
-                (nest ,@(collect array-pointer-bindings)
+                                    (thunk array)))))
+                         (with-constant-maybe-string ((pointer string) &body body)
+                           `(flet ((thunk (,pointer) ,@body))
+                              (let ((string ,string))
+                                (if string
+                                    (with-constant-string (pointer string) (thunk pointer))
+                                    (thunk string))))))
+                (nest ,@(collect pointer-bindings)
                   (progn
                     ,@(collect arg-setup-forms)
                     (unwind-protect
@@ -125,22 +131,31 @@ The CAR of the result is the original integer; the CDR is the ~
                 (allow-null-p `(or ,base-type null))
                 (t base-type))))
       (case type
+        (string
+         (let ((string-pointer (gensym (lispify name 'string-pointer))))
+           (collect pointer-bindings
+             (if allow-null-p
+                 `(with-constant-maybe-string (,string-pointer ,var))
+                 `(with-constant-string (,string-pointer ,var))))
+           (collect arg-setup-forms
+             `(setf (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. string) ,string-pointer))))
         (array
          (let ((array-pointer (gensym (lispify name 'array-pointer)))
                (array-index (prog1 n-arrays (incf n-arrays))))
-           (collect array-pointer-bindings
+           (collect pointer-bindings
              (if allow-null-p
                  `(with-maybe-vector-data (,array-pointer ,var))
                  `(with-pointer-to-vector-data (,array-pointer ,var))))
            (collect arg-setup-forms
-             `(when ,(if allow-null-p var t)
-                (macrolet ((arr (&rest stuff)
-                             `(c-access (:struct wayland-array) ,',wayland-arrays (,',array-index) ,@stuff)))
-                  (setf (arr :. size) (length ,var)
-                        (arr :. alloc) (length ,var)
-                        (arr :. data) ,array-pointer
-                        (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. array)
-                        (arr :&)))))))
+             `(macrolet ((arr (&rest stuff)
+                           `(c-access (:struct wayland-array) ,',wayland-arrays (,',array-index) ,@stuff)))
+                (setf (c-access (:union wayland-argument) ,wayland-arguments (,arg-index))
+                      (if ,(if allow-null-p var t)
+                          (progn (setf (arr :. size) (length ,var)
+                                       (arr :. alloc) (length ,var)
+                                       (arr :. data) ,array-pointer)
+                                 (arg :&))
+                          (null-pointer)))))))
         (new-id
          (assert (null (shiftf new-object-var var)))
          (if interface
@@ -155,16 +170,15 @@ The CAR of the result is the original integer; the CDR is the ~
                         (version ,var)))
                (incf arg-index))))
         (t (collect arg-setup-forms
-             `(when ,(if allow-null-p var t)
-                (setf (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. ,type)
-                      ,(if enum
-                           `(,(intern (multiple-value-bind (interface enum) (parse-dotted enum interface-name)
-                                        (lispify interface 'marshal enum)))
-                             ,var)
-                           (ecase type
-                             ((int uint string fd) var)
-                             (fixed `(the integer (* ,var 256)))
-                             (object `(pointer ,var))))))))))))
+             `(setf (c-access (:union wayland-argument) ,wayland-arguments (,arg-index) :. ,type)
+                    ,(if enum
+                         `(,(intern (multiple-value-bind (interface enum) (parse-dotted enum interface-name)
+                                      (lispify interface 'marshal enum)))
+                           ,var)
+                         (ecase type
+                           ((int uint fd) var)
+                           (fixed `(the integer (* ,var 256)))
+                           (object `(if ,(if allow-null-p var t) (pointer ,var) (null-pointer))))))))))))
 
 (defmacro define-event ((interface-name event-name &key opcode description destructor-p since export) &body args)
   (declare (ignore since))

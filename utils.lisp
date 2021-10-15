@@ -2,7 +2,7 @@
   (:use #:cl #:alexandria #:cffi)
   (:import-from #:cxml-dom)
   (:export #:make-collector #:collect #:get-attribute #:parse-dotted #:lispify)
-  (:export #:do-collecting #:nest #:c-access))
+  (:export #:do-collecting #:nest #:c-access #:with-constant-string))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client/utils)
 
 (defun make-collector ()
@@ -75,3 +75,21 @@
              (setf type `(:pointer ,type) deref nil))
             ((eql :*)
              (setf base (val) type (pointer-type) deref t))))))))
+
+#-sbcl
+(defmacro with-constant-string ((pointer string) &body body)
+  `(with-foreign-string (,pointer ,string) ,@body))
+
+;;; SBCL stores BASE-STRINGs null-terminated specifically so that
+;;; conversion to a c-string optimizes down to a with-pinned-objects
+;;; vector-sap. It would be a shame to let that work go to waste... If
+;;; I'm reading the deftransforms correctly, in the base-string case
+;;; this should optimize correctly; unfortunately I have to drop down
+;;; to sb-alien-internals to make that work. Ideas welcome.
+#+sbcl
+(defmacro with-constant-string ((pointer string) &body body &environment env)
+  (let ((type (sb-alien-internals:parse-alien-type 'sb-alien:c-string env)))
+    `(let ((,pointer (sb-alien-internals:deport-alloc ,string ',type)))
+       (sb-sys:with-pinned-objects (,pointer)
+         (let ((,pointer (sb-alien-internals:deport ,pointer ',type)))
+           ,@body)))))
