@@ -149,7 +149,7 @@ The CAR of the result is the original integer; the CDR is the ~
           ,@(when export `((eval-when (:compile-toplevel :load-toplevel :execute)
                              (export ',function-name))))))
     (destructuring-bind (name type &key enum interface allow-null-p &allow-other-keys
-                         &aux (var (gensym (lispify name))))
+                         &aux (var (make-symbol (lispify name))))
         (first remaining-args)
       (when enum (assert (member type '(int uint))))
       (when allow-null-p (assert (member type '(string object array))))
@@ -220,7 +220,11 @@ The CAR of the result is the original integer; the CDR is the ~
   (declare (ignore since))
   (let ((function-name (intern (lispify interface-name event-name))))
     `(progn
-       (defgeneric ,function-name (target ,@(mapcar (compose #'make-symbol #'lispify #'first) args)))
+       ,(let ((lambda-args (mapcar (compose #'make-symbol #'lispify #'first) args)))
+          `(defgeneric ,function-name (target ,@lambda-args)
+             (:method ((target ,(intern (lispify interface-name))) ,@lambda-args)
+               (declare (ignore ,@lambda-args))
+               nil)))
        (defmethod dispatch-wayland-event ((target ,(intern (lispify interface-name))) (opcode (eql ,opcode))
                                           arguments-pointer)
          ,@(when description `(,description))
