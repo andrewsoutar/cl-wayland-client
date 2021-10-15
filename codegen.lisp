@@ -68,7 +68,7 @@ The CAR of the result is the original integer; the CDR is the ~
             ,@(when since `((when (< (version ,object) ,since)
                               (error "~A::~A requires version ~A, but only have version ~A"
                                      ,interface-name ,request-name ,since (version ,object)))))
-            (with-foreign-objects ((,wayland-arguments '(:union wayland-argument) ,(length args))
+            (with-foreign-objects ((,wayland-arguments '(:union wayland-argument) ,arg-index)
                                    ,@(unless (zerop n-arrays) `(,wayland-arrays (:struct wayland-array) ,n-arrays)))
               (macrolet ((with-maybe-vector-data ((pointer array) &body body)
                            `(flet ((thunk (,pointer) ,@body))
@@ -84,7 +84,6 @@ The CAR of the result is the original integer; the CDR is the ~
                               `(set-proxy-pointer ,new-object-var
                                                   (wl-proxy-marshal-array-constructor-versioned
                                                    (pointer ,object) ,opcode ,wayland-arguments
-                                                   ;; FIXME check this interface against what it's supposed to be
                                                    (wayland-interface ,new-object-var)
                                                    (if (slot-boundp ,new-object-var 'version)
                                                        (version ,new-object-var)
@@ -95,7 +94,8 @@ The CAR of the result is the original integer; the CDR is the ~
                   (values ,@(when new-object-var `(,new-object-var)))))))
           ,@(when export `((eval-when (:compile-toplevel :load-toplevel :execute)
                              (export ',function-name))))))
-    (destructuring-bind (name type &key enum allow-null-p &allow-other-keys &aux (var (gensym (lispify name))))
+    (destructuring-bind (name type &key enum interface allow-null-p &allow-other-keys
+                         &aux (var (gensym (lispify name))))
         (first remaining-args)
       (when enum (assert (member type '(int uint))))
       (when allow-null-p (assert (member type '(string object array))))
@@ -131,7 +131,19 @@ The CAR of the result is the original integer; the CDR is the ~
                         (c-access (:pointer (:union wayland-argument))
                                   ,wayland-arguments (,arg-index) :. array)
                         (arr :&)))))))
-        (new-id (assert (null (shiftf new-object-var var))))
+        (new-id
+         (assert (null (shiftf new-object-var var)))
+         (if interface
+             `(assert (pointer-eq
+                       (foreign-symbol-pointer ,(format nil "~A_interface" interface) :library libwayland-client)
+                       (wayland-interface ,var)))
+             (progn
+               (collect arg-setup-forms
+                 `(setf (c-access (:pointer (:union wayland-argument)) ,wayland-arguments (,arg-index) :. string)
+                        (c-access (:pointer (:struct wayland-interface)) (wayland-interface ,var) :-> name)
+                        (c-access (:pointer (:union wayland-argument)) ,wayland-arguments (,(incf arg-index)) :. uint)
+                        (version ,var)))
+               (incf arg-index))))
         (t (collect arg-setup-forms
              `(when ,(if allow-null-p var t)
                 (setf (c-access (:pointer (:union wayland-argument)) ,wayland-arguments (,arg-index) :. ,type)

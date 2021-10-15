@@ -5,6 +5,7 @@
   (:export #:find-proxy #:set-proxy-pointer #:destroy-proxy)
   (:export #:wayland-array-arg #:size #:data)
   (:export #:wayland-argument #:int #:uint #:fixed #:string #:object #:array #:fd)
+  (:export #:wayland-interface #:name #:version)
   (:export #:wl-proxy-marshal-array #:wl-proxy-marshal-array-constructor-versioned))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client/core)
 
@@ -82,6 +83,12 @@
   (object :pointer)
   (array (:pointer (:struct wayland-array-arg)))
   (fd :int32))
+
+(defcstruct wayland-interface
+  (name :string)
+  (version :int)
+  ;; Don't need the rest
+  )
 
 (defcfun (wl-proxy-marshal-array :library libwayland-client) :void
   (proxy :pointer) (opcode :uint32) (arguments (:pointer (:union wayland-argument))))
