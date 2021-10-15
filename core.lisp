@@ -16,7 +16,7 @@
 
 (defclass wayland-proxy ()
   ((pointer :type foreign-pointer :reader pointer)
-   (version :type (unsigned-byte 32) :reader version :initarg :version)))
+   (version :type (unsigned-byte 32) :reader version)))
 
 (defgeneric wayland-interface (proxy-object))
 
@@ -71,6 +71,7 @@
 
 ;;; HACK
 (defctype size-t #+64-bit :uint64 #+32-bit :uint32)
+
 (defcstruct wayland-array-arg
   (size size-t)
   (alloc size-t)
@@ -89,6 +90,11 @@
   (version :int)
   ;; Don't need the rest
   )
+
+(defmethod initialize-instance :after ((proxy wayland-proxy) &key version &allow-other-keys)
+  (when (and version (not (slot-boundp proxy 'version)))
+    (setf (slot-value proxy 'version)
+          (min version (foreign-slot-value (wayland-interface proxy) '(:struct wayland-interface) 'version)))))
 
 (defcfun (wl-proxy-marshal-array :library libwayland-client) :void
   (proxy :pointer) (opcode :uint32) (arguments (:pointer (:union wayland-argument))))
