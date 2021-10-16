@@ -222,12 +222,12 @@ The CAR of the result is the original integer; the CDR is the ~
     `(progn
        ,(let ((lambda-args (mapcar (compose #'make-symbol #'lispify #'first) args)))
           `(defgeneric ,function-name (target ,@lambda-args)
+             ,@(when description `((:documentation ,description)))
              (:method ((target ,(intern (lispify interface-name))) ,@lambda-args)
                (declare (ignore ,@lambda-args))
                nil)))
        (defmethod dispatch-wayland-event ((target ,(intern (lispify interface-name))) (opcode (eql ,opcode))
                                           arguments-pointer)
-         ,@(when description `(,description))
          ,@(when destructor-p `((destroy-proxy target)))
          (,function-name
           target
