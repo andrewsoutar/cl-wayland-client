@@ -7,7 +7,7 @@
   (:export #:wl-display-connect #:wl-display-disconnect #:wl-display-dispatch))
 (uiop:define-package #:com.andrewsoutar.cl-wayland-client/protocol/helpers
   (:use #:cl)
-  (:import-from #:cffi #:defcfun #:null-pointer)
+  (:import-from #:cffi #:defcfun #:null-pointer #:null-pointer-p)
   (:import-from #:com.andrewsoutar.cl-wayland-client/core #:libwayland-client #:pointer #:set-proxy-pointer #:destroy-proxy))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client/protocol)
 
@@ -20,7 +20,10 @@
 (defun com.andrewsoutar.cl-wayland-client/protocol:wl-display-connect (name)
   (set-proxy-pointer
    (make-instance 'com.andrewsoutar.cl-wayland-client/protocol:wl-display :version 0)
-   (wl-display-connect (or name (null-pointer)))
+   (let ((pointer (wl-display-connect (or name (null-pointer)))))
+     (when (null-pointer-p pointer)
+       (error "Couldn't connect to ~:[default wayland display~;wayland display ~:*~A~]" name))
+     pointer)
    :install-dispatcher nil))
 
 (defcfun (wl-display-disconnect :library libwayland-client) :void
