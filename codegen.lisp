@@ -102,7 +102,7 @@ The CAR of the result is the original integer; the CDR is the ~
        (arg-lisp-types (make-collector))
        (pointer-bindings (make-collector))
        (arg-setup-forms (make-collector))
-       (object (gensym "OBJECT"))
+       (object (make-symbol "OBJECT"))
        (wayland-arguments (gensym "WAYLAND-ARGUMENTS"))
        (wayland-arrays (gensym "WAYLAND-ARRAYS"))
        new-object-var)
