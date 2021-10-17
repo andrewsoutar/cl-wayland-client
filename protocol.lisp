@@ -2,9 +2,9 @@
   (:nicknames #:com.andrewsoutar.cl-wayland-client/protocol)
   (:use #:cl)
   (:import-from #:cffi)
-  (:import-from #:com.andrewsoutar.cl-wayland-client/core)
+  (:import-from #:com.andrewsoutar.cl-wayland-client/core #:wayland-destroy)
   (:import-from #:com.andrewsoutar.cl-wayland-client/codegen)
-  (:export #:wl-display-connect #:wl-display-disconnect #:wl-display-dispatch))
+  (:export #:wl-display-connect #:wl-display-disconnect #:wl-display-dispatch #:wayland-destroy))
 (uiop:define-package #:com.andrewsoutar.cl-wayland-client/protocol/helpers
   (:use #:cl)
   (:import-from #:cffi #:defcfun #:null-pointer #:null-pointer-p)

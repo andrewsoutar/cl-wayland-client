@@ -146,6 +146,11 @@ The CAR of the result is the original integer; the CDR is the ~
                               `(wl-proxy-marshal-array (pointer ,object) ,opcode ,wayland-arguments))
                       ,@(when destructor-p `((destroy-proxy ,object)))))
                   (values ,@(when new-object-var `(,new-object-var)))))))
+          ,@(when (string= request-name "destroy")
+              (assert destructor-p)
+              (assert (null args))
+              `((defmethod wayland-destroy ((object ,(intern (lispify interface-name))))
+                  (,function-name object))))
           ,@(when export `((eval-when (:compile-toplevel :load-toplevel :execute)
                              (export ',function-name))))))
     (destructuring-bind (name type &key enum interface allow-null-p &allow-other-keys

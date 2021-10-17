@@ -1,7 +1,7 @@
 (uiop:define-package #:com.andrewsoutar.cl-wayland-client/core
   (:use #:cl #:cffi)
   (:export #:libwayland-client)
-  (:export #:wayland-proxy #:pointer #:version #:wayland-interface #:dispatch-wayland-event)
+  (:export #:wayland-proxy #:pointer #:version #:wayland-interface #:dispatch-wayland-event #:wayland-destroy)
   (:export #:find-proxy #:set-proxy-pointer #:destroy-proxy)
   (:export #:wayland-array-arg #:size #:data)
   (:export #:wayland-argument #:int #:uint #:fixed #:string #:object #:array #:fd)
@@ -24,6 +24,8 @@
 (defgeneric wayland-interface (proxy-object))
 
 (defgeneric dispatch-wayland-event (target opcode arguments))
+
+(defgeneric wayland-destroy (object))
 
 
 (defvar *lisp-proxies* (make-hash-table :test 'eql))
@@ -65,11 +67,15 @@
 
 (defun destroy-proxy (proxy &key (destroy-pointer t))
   (declare (type wayland-proxy proxy))
-  (let ((pointer (pointer proxy)))
-    (when destroy-pointer
-      (wl-proxy-destroy pointer))
-    (remhash (pointer-address pointer) *lisp-proxies*))
-  (slot-makunbound proxy 'pointer))
+  (when (slot-boundp proxy 'pointer)
+    (let ((pointer (pointer proxy)))
+      (when destroy-pointer
+        (wl-proxy-destroy pointer))
+      (remhash (pointer-address pointer) *lisp-proxies*))
+    (slot-makunbound proxy 'pointer)))
+
+(defmethod wayland-destroy ((object wayland-proxy))
+  (destroy-proxy object))
 
 
 ;;; HACK
