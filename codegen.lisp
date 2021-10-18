@@ -40,7 +40,7 @@
                                                (object "o")
                                                (new-id (if interface "n" "sun"))
                                                (array "a")
-                                               (fd #\h)))))
+                                               (fd "h")))))
                                  args))
                 ,,@(mapcar (lambda (arg)
                              (if (third arg) (interface-var-name (third arg)) '(null-pointer)))
