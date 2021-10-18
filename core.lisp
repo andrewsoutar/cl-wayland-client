@@ -78,12 +78,9 @@
   (destroy-proxy object))
 
 
-;;; HACK
-(defctype size-t #+64-bit :uint64 #+32-bit :uint32)
-
 (defcstruct wayland-array-arg
-  (size size-t)
-  (alloc size-t)
+  (size :size)
+  (alloc :size)
   (data :pointer))
 (defcunion wayland-argument
   (int :int32)
