@@ -1,7 +1,6 @@
 (uiop:define-package #:com.andrewsoutar.cl-wayland-client/utils
   (:use #:cl #:alexandria #:cffi)
-  (:import-from #:cxml-dom)
-  (:export #:make-collector #:collect #:get-attribute #:parse-dotted #:lispify)
+  (:export #:make-collector #:collect #:parse-dotted #:lispify)
   (:export #:do-collecting #:nest #:c-access #:with-constant-string))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client/utils)
 
@@ -14,10 +13,6 @@
   (when things
     (setf (car collector) (last (setf (cdar collector) things))))
   (cdr collector))
-
-(defun get-attribute (element name)
-  (when-let ((attr (dom:get-attribute-node element name)))
-    (dom:value attr)))
 
 (defun parse-dotted (name interface-name)
   (if-let ((pos (position #\. name)))
