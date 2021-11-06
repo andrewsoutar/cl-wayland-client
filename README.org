@@ -1,0 +1,271 @@
+#+STARTUP: indent
+
+* CL-WAYLAND-CLIENT
+This package provides lispy bindings for libwayland-client by
+generating protocol wrappers from Wayland's XML protocol
+definitions. The bindings work as follows:
+** Interfaces
+Each Wayland interface is represented by its own subclass of
+~WAYLAND-PROXY~, eg. objects of type wl_registry can be represented by
+(subclasses of) the ~WL-REGISTRY~ class. Objects of these classes act,
+to CL-WAYLAND-CLIENT, as opaque handles which can be passed to
+requests and get returned by events. Each Wayland object may be
+associated with, at most, one Lisp object; this assocation is
+established when the object is passed to any allocation request. You
+may override the version of an object using the ~INITARG~ ~:VERSION~;
+this will be capped at the maximum version supported by the XML
+protocol definition.
+** Requests
+Each Wayland request is represented by a function which takes the same
+parameters as the request. The first parameter is always an object in
+whose interface the request is defined. As a convenience, if the
+request takes a new_id parameter, the object passed to that parameter
+will be returned from the request. Parameters are encoded as follows:
+- Ints, unsigned ints, and file descriptors are passed as integers.
+- Fixeds are represented as any kind of ~NUMBER~ which is an exact
+  multiple of 1/256 and fits within the range of Wayland fixed-point
+  numbers. For instance, the number may be represented by an
+  ~INTEGER~, a ~RATIONAL~, or a ~FLOAT~ (be mindful of precision,
+  especially if you use a ~SINGLE-FLOAT~).
+- Strings are represented by Lisp strings.
+- Arrays are represented by Lisp arrays created by
+  ~CFFI:MAKE-SHAREABLE-BYTE-VECTOR~. All known implementations use a
+  ~(SIMPLE-ARRAY (UNSIGNED-BYTE 8))~ for this.
+- Objects (including new_id's) are represented by instances of
+  interface classes, as discussed above.
+- If any parameter is permitted to be NULL, NIL may be passed to
+  represent this case. This applies to strings, arrays, and objects.
+** Events
+Each Wayland event is represented as a generic function which is
+called by ~WL-DISPLAY-DISPATCH~ (see below) when the event is emitted
+by the compositor. Its first parameter is the object which emitted the
+event; the remaining parameters are the event parameters, encoded in
+the same way as for requests, with one exception: arrays are instead
+passed as a ~(CONS LENGTH POINTER)~ (where ~LENGTH~ is in bytes), to
+avoid the overhead of copying.
+** Helpers
+CL-WAYLAND-CLIENT provides a small number of other functions you may
+be interested in:
+- ~(WL-DISPLAY-CONNECT NAME)~ :: creates a ~WL-DISPLAY~ connected to
+  Wayland display ~NAME~ (~NIL~ for default). See the documentation
+  for [[https://wayland.freedesktop.org/docs/html/apb.html#Client-classwl__display_1af048371dfef7577bd39a3c04b78d0374][wl_display_connect]] for details about the ~NAME~.
+- ~(WL-DISPLAY-DISCONNECT DISPLAY)~ :: disconnects a ~WL-DISPLAY~.
+- ~(WL-DISPLAY-DISPATCH DISPLAY)~ :: receive and dispatch all pending
+  events on the connection associated with the ~WL-DISPLAY~ ~DISPLAY~.
+- ~(WAYLAND-DESTROY OBJECT)~ :: destroy an object that represents an
+  interface. If the interface has a destructor request, the destructor
+  will be called.
+** Protocol Extensions
+The core wayland protocol, along with the helpers, is provided through
+the package ~COM.ANDREWSOUTAR.CL-WAYLAND-CLIENT~ (and the ASDF system
+of the same name, lowercased). Bindings for protocol extensions may be
+loaded on-demand in the packages
+~COM.ANDREWSOUTAR.CL-WAYLAND-CLIENT.PROTOCOL/PROTOCOL-PATH~ (and ASDF
+systems of the same name, lowercase). ~PROTOCOL-PATH~ is given
+relative to ~/usr/share/wayland-protocols~; eg. for the xdg-shell
+extension, you should ~:DEPENDS-ON
+("com.andrewsoutar.wayland-client.protocol/stable/xdg-shell/xdg-shell")~
+and ~(USE-PACKAGE
+#:COM.ANDREWSOUTAR.WAYLAND-CLIENT.PROTOCOL/STABLE/XDG-SHELL/XDG-SHELL)~.
+* Example
+The following example runs in SBCL (it uses ~sb-posix~ for creating
+shared memory files); ports are welcome.
+#+begin_src common-lisp
+  ;;; Load the core protocol and the xdg-shell extension (from
+  ;;; /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml).
+
+  ;;; Apologies for the long example; Wayland can be rather verbose.
+  (use-package
+   (ql:quickload '(:cffi
+                   :com.andrewsoutar.cl-wayland-client
+                   :com.andrewsoutar.cl-wayland-client.protocol/stable/xdg-shell/xdg-shell)))
+
+  ;;; Create a registry object which records all globals
+  (defclass recording-registry (wl-registry)
+    ((globals :type list :accessor globals :initform ())))
+
+  ;;; React to events on the registry
+  (defmethod wl-registry-global ((self recording-registry) name interface version)
+    (push (list name interface version) (globals self)))
+
+  (defmethod wl-registry-global-remove ((self recording-registry) name)
+    (setf (globals self) (delete name (globals self) :key #'first)))
+
+  (defun wl-registry-find-or-lose (registry interface &optional version)
+    (or (dolist (global (globals registry))
+          (destructuring-bind (gname ginterface gversion) global
+            (when (and (equal ginterface interface)
+                       (or (null version) (>= gversion version)))
+              (return (values gname gversion)))))
+        (error "Wayland: could not find interface ~A~@[ version ~A~] in registry"
+               interface version)))
+
+
+  ;;; Create a xdg_wm_base subclass which responds to pings
+  (defclass xdg-wm-base-pingpong (xdg-wm-base) ())
+
+  ;;; Every time we receive a ping, send back a pong
+  (defmethod xdg-wm-base-ping ((self xdg-wm-base-pingpong) serial)
+    (xdg-wm-base-pong self serial))
+
+
+  ;;; wl-callbacks created from this class will call the callback fun
+  (defclass invoking-callback (wl-callback)
+    ((fun :type (function ((unsigned-byte 32)) *) :accessor fun :initarg :fun)))
+
+  (defmethod wl-callback-done ((self invoking-callback) data)
+    (funcall (fun self) data))
+
+
+  (defun roundtrip (display)
+    "Wait for all previous requests to be processed by the wayland compositor"
+    (let (callback done-p)
+      (unwind-protect
+           (flet ((set-done (x)
+                    (declare (ignore x))
+                    (setf done-p t)))
+             ;; This request simply invokes the provided callback as
+             ;; soon as it's processed. Since Wayland processes requests
+             ;; in order, it won't be processed until all prior requests
+             ;; are done being processed.
+             (setf callback (wl-display-sync display (make-instance 'invoking-callback :fun #'set-done)))
+             (loop until done-p do (wl-display-dispatch display)))
+        (when callback (wayland-destroy callback)))))
+
+
+  #-sbcl (error "This is only supported on SBCL")
+  (defun tmpfile (size)
+    "Create an anonymous temporary file of the given size. Returns a file descriptor."
+    (let (done fd pathname)
+      (unwind-protect
+           (progn
+             (setf (values fd pathname) (sb-posix:mkstemp "/dev/shm/tmp.XXXXXXXX"))
+             (sb-posix:unlink pathname)
+             (sb-posix:ftruncate fd size)
+             (setf done t))
+        (when (and fd (not done)) (sb-posix:close fd)))
+      fd))
+
+  ;;; Something to keep track of the window we're going to create
+  (defvar *window*)
+  (defclass window (wl-surface)
+    ((open-p :initform t :accessor open-p)
+     (needs-redraw-p :initform nil :accessor needs-redraw-p)))
+
+  (defclass window-xdg-surface (xdg-surface) ())
+  (defmethod xdg-surface-configure ((self window-xdg-surface) serial)
+    ;; Once we've been configured, we need to redraw
+    (setf (needs-redraw-p *window*) t)
+    ;; We handle configuration events immediately, so we can acknowledge
+    ;; right away
+    (xdg-surface-ack-configure self serial))
+
+  (defclass window-xdg-toplevel (xdg-toplevel) ())
+  (defmethod xdg-toplevel-configure ((self window-xdg-toplevel) width height states)
+    ;; We're not implementing resizing or anything
+    (declare (ignore width height states))
+    (setf (needs-redraw-p *window*) t))
+  (defmethod xdg-toplevel-close ((self window-xdg-toplevel))
+    (setf (open-p *window*) nil))
+
+
+  (defparameter *height* 400)
+  (defparameter *width* 600)
+
+  ;;; 4 bytes per pixel for XRGB8888
+  (defparameter *depth* 4)
+
+  (defun pool-size ()
+    ;; 2 buffers (front and back)
+    (* 2 *height* *width* *depth*))
+
+
+  (defun main ()
+    (let #1=(display registry compositor *window* wm-base xdg-surface xdg-toplevel wl-shm fd mmap
+                     shm-pool wl-buffer-0 wl-buffer-1)
+      (unwind-protect
+           (progn
+             ;; Connect to the default display
+             (setf display (wl-display-connect nil))
+             ;; Make a new recording-registry, and connect it to the
+             ;; display. Since the registry is a new_id parameter, it is
+             ;; returned from the request.
+             (setf registry (wl-display-get-registry display (make-instance 'recording-registry)))
+             ;; Wait for all wl_registry_global callbacks to be received
+             (roundtrip display)
+
+             ;; Boilerplate for creating a window:
+
+             ;; We don't need to do anything special with the compositor
+             ;; or the surface, so we can just use the base classes
+             (setf compositor (wl-registry-bind registry (wl-registry-find-or-lose registry "wl_compositor" 4)
+                                                (make-instance 'wl-compositor :version 4)))
+             ;; Create the surface for the window itself - this is where
+             ;; we'll draw everything
+             (setf *window* (wl-compositor-create-surface compositor (make-instance 'window)))
+             ;; Bind the global xdg_wm_base to an instance of our pingpong
+             ;; class
+             (setf wm-base (wl-registry-bind registry (wl-registry-find-or-lose registry "xdg_wm_base" 1)
+                                             (make-instance 'xdg-wm-base-pingpong :version 1)))
+             ;; Create a xdg_surface for our window
+             (setf xdg-surface (xdg-wm-base-get-xdg-surface wm-base (make-instance 'window-xdg-surface) *window*))
+             ;; Make the xdg_surface a toplevel window
+             (setf xdg-toplevel (xdg-surface-get-toplevel xdg-surface (make-instance 'window-xdg-toplevel)))
+
+             ;; Create a shared memory buffer for drawing to the window
+             (setf wl-shm (wl-registry-bind registry (wl-registry-find-or-lose registry "wl_shm" 1)
+                                            (make-instance 'wl-shm :version 1)))
+             ;; Create an unlinked file to back the shared memory
+             (setf fd (tmpfile (pool-size)))
+             (setf mmap (sb-posix:mmap nil (pool-size) (logior sb-posix:prot-read sb-posix:prot-write)
+                                       sb-posix:map-shared fd 0))
+
+             ;; Hand the file to the compositor
+             (setf shm-pool (wl-shm-create-pool wl-shm (make-instance 'wl-shm-pool) fd (pool-size)))
+
+             ;; Create two buffers from the pool: one starting at zero...
+             (setf wl-buffer-0 (wl-shm-pool-create-buffer shm-pool (make-instance 'wl-buffer) 0
+                                                          ,*width* *height* (* *width* *depth*)
+                                                          :xrgb8888))
+             ;; ...and one starting halfway through
+             (setf wl-buffer-1 (wl-shm-pool-create-buffer shm-pool (make-instance 'wl-buffer) (/ (pool-size) 2)
+                                                          ,*width* *height* (* *width* *depth*)
+                                                          :xrgb8888))
+
+             (let ((front-buffer (cons (mem-aptr mmap :char 0) wl-buffer-0))
+                   (back-buffer (cons (mem-aptr mmap :char (/ (pool-size) 2)) wl-buffer-1)))
+               ;; First we commit the window surface, to indicate that it's fully configured
+               (wl-surface-commit *window*)
+               (loop while (open-p *window*) do
+                 ;; Dispatch any events we've received
+                 (wl-display-dispatch display)
+                 (when (needs-redraw-p *window*)
+                   ;; Draw a nice checkerboard pattern to the back buffer
+                   (loop for y from 0 below *height* do
+                     (loop for x from 0 below *width* do
+                       (setf (mem-aref (car back-buffer) :uint32 (+ x (* y *width*)))
+                             (if (zerop (mod (+ (floor x 8) (floor y 8)) 2))
+                                 #xFF666666
+                                 #xFFEEEEEE))))
+                   ;; Swap buffers
+                   (rotatef front-buffer back-buffer)
+                   ;; Attach the buffer to the window
+                   (wl-surface-attach *window* (cdr front-buffer) 0 0)
+                   ;; We're not doing damage tracking, so mark the whole
+                   ;; surface as damaged
+                   (wl-surface-damage-buffer *window* 0 0 *width* *height*)
+                   ;; Commit to show onscreen
+                   (format t "Drawing...~%")
+                   (wl-surface-commit *window*)
+                   (setf (needs-redraw-p *window*) nil)))))
+        ;; Clean up all objects in reverse order that they were created
+        (dolist (obj #.`(list ,@(reverse '#1#)))
+          (when obj
+            (cond ((eql obj display)
+                   (wl-display-disconnect obj))
+                  ((eql obj fd)
+                   (sb-posix:close fd))
+                  ((eql obj mmap)
+                   (sb-posix:munmap mmap (pool-size)))
+                  (t (wayland-destroy obj))))))))
+#+end_src
