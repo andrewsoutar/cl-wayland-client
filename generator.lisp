@@ -2,7 +2,8 @@
   (:nicknames #:com.andrewsoutar.cl-wayland-client.generator/generator)
   (:use #:cl #:alexandria #:asdf #:com.andrewsoutar.asdf-generated-system)
   (:use #:com.andrewsoutar.cl-wayland-client/utils #:com.andrewsoutar.cl-wayland-client/codegen)
-  (:import-from #:uiop #:ensure-package #:define-package #:subpathname #:with-staging-pathname)
+  (:import-from #:uiop #:ensure-package #:define-package #:subpathname #:with-staging-pathname
+                #:xdg-data-pathname)
   (:import-from #:cxml-dom)
   (:export #:protocol-system))
 (cl:in-package #:com.andrewsoutar.cl-wayland-client.generator/generator)
@@ -133,8 +134,11 @@
 (defclass protocol-system (generated-system) ())
 
 (defun wayland-xml-name (subname)
-  (list (subpathname (if (equal subname "wayland") "/usr/share/wayland/" "/usr/share/wayland-protocols/")
-                     subname :type "xml")))
+  (let ((subname-directory (if (string= subname "wayland")
+                               "wayland/"
+                               "wayland-protocols/")))
+    (list (xdg-data-pathname
+           (subpathname subname-directory subname :type "xml")))))
 
 (defmethod generated-system-dependencies append ((s protocol-system) subname)
   (unless (equal subname "wayland") (list (concatenate 'string (component-name s) "/wayland"))))
