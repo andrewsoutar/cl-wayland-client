@@ -46,10 +46,10 @@
       (return-from wayland-event-dispatcher ret))))
 
 
-(defcfun (wl-proxy-add-dispatcher :library libwayland-client) :int
+(defcfun ("wl_proxy_add_dispatcher" :library libwayland-client) :int
   (proxy :pointer) (dispatcher :pointer) (implementation :pointer) (data :pointer))
 
-(defcfun (wl-proxy-destroy :library libwayland-client) :void
+(defcfun ("wl_proxy_destroy" :library libwayland-client) :void
   (proxy :pointer))
 
 (defun set-proxy-pointer (proxy pointer &key (install-dispatcher t))
@@ -144,9 +144,9 @@
     (setf (slot-value proxy 'version)
           (min version (foreign-slot-value (wayland-interface proxy) '(:struct wayland-interface) 'version)))))
 
-(defcfun (wl-proxy-marshal-array :library libwayland-client) :void
+(defcfun ("wl_proxy_marshal_array" :library libwayland-client) :void
   (proxy :pointer) (opcode :uint32) (arguments (:pointer (:union wayland-argument))))
 
-(defcfun (wl-proxy-marshal-array-constructor-versioned :library libwayland-client) :pointer
+(defcfun ("wl_proxy_marshal_array_constructor_versioned" :library libwayland-client) :pointer
   (proxy :pointer) (opcode :uint32) (arguments (:pointer (:union wayland-argument)))
   (interface :pointer) (version :uint32))
