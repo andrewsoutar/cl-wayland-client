@@ -137,8 +137,15 @@
   (let ((subname-directory (if (string= subname "wayland")
                                "wayland/"
                                "wayland-protocols/")))
-    (list (xdg-data-pathname
-           (subpathname subname-directory subname :type "xml")))))
+    (list
+     (or (xdg-data-pathname
+          (subpathname subname-directory subname :type "xml"))
+         (error "Unable to locate protocol definition for ~S.~%~
+                 Are you sure you installed the relevant Wayland protocol ~
+                 definition file?~%~
+                 (If you installed it to a nonstandard location, make sure ~
+                 that the location is in your $XDG_DATA_DIRS.)"
+                subname)))))
 
 (defmethod generated-system-dependencies append ((s protocol-system) subname)
   (unless (equal subname "wayland") (list (concatenate 'string (component-name s) "/wayland"))))
