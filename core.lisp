@@ -13,6 +13,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (define-foreign-library libwayland-client
+    (:linux (:or "libwayland-client.so.0" (:default "libwayland-client")))
     (t (:default "libwayland-client"))))
 (use-foreign-library libwayland-client)
 
