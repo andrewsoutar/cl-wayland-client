@@ -160,7 +160,10 @@
     (declare (ignore primary-name))
     (when-let (in (input-files o c))
       (with-staging-pathname (tmp (output-file o c))
-        (with-open-file (tmp tmp :direction :output :if-exists :overwrite)
+        (with-open-file
+            (tmp tmp :direction :output :if-exists :overwrite
+                     :element-type 'character
+                     :external-format (component-external-format (find-component c "generated")))
           (let* ((package-name (string-upcase (component-name c)))
                  (use-list (mapcar #'string-upcase (generated-system-dependencies primary subname)))
                  (*package* (find-package :keyword)))
