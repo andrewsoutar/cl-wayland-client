@@ -269,3 +269,8 @@ shared memory files); ports are welcome.
                    (sb-posix:munmap mmap (pool-size)))
                   (t (wayland-destroy obj))))))))
 #+end_src
+
+* Hardware accelerated buffers (EGL)
+Optionally this library provides bindings to =libwayland-egl= which allows for EGL buffers to be attached to surfaces for rendering.
+
+There is an example using EGL and OpenGL, similar to the Shared Memory buffer example above, in the =examples/= directory.
